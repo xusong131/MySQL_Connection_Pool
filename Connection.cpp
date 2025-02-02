@@ -1,49 +1,73 @@
-#include "pch.h"
-#include "public.h"
-#include "Connection.h"
-#include <iostream>
-using namespace std;
+#include<iostream>
+#include<string>
+#include<mysql.h>
+#include"public.h"
+#include"connection.h"
 
-Connection::Connection()
+Connection:: Connection()
 {
-	// 初始化数据库连接
-	_conn = mysql_init(nullptr);
+	m_conn = mysql_init(nullptr);
 }
-
-Connection::~Connection()
+Connection:: ~Connection()
 {
-	// 释放数据库连接资源
-	if (_conn != nullptr)
-		mysql_close(_conn);
+	if (m_conn != nullptr)
+		mysql_close(m_conn);
 }
-
-bool Connection::connect(string ip, unsigned short port, 
-	string username, string password, string dbname)
+bool Connection::connect(std::string ip, unsigned short port, std::string usename,
+	std::string passwd, std::string dbname)
 {
-	// 连接数据库
-	MYSQL *p = mysql_real_connect(_conn, ip.c_str(), username.c_str(),
-		password.c_str(), dbname.c_str(), port, nullptr, 0);
-	return p != nullptr;
+	MYSQL* p = mysql_real_connect(m_conn, ip.c_str(), usename.c_str(),
+		passwd.c_str(), dbname.c_str(), port, nullptr, 0);
+    if (mysql_set_character_set(m_conn, "utf8mb4"))
+    {
+        LOG("Failed to set character set: " + std::string(mysql_error(m_conn)));
+        return false;
+    }
+    return true;
 }
-
-bool Connection::update(string sql)
+bool Connection::update(std::string sql)
 {
-	// 更新操作 insert、delete、update
-	if (mysql_query(_conn, sql.c_str()))
+	if (mysql_query(m_conn, sql.c_str()))
 	{
-		LOG("更新失败:" + sql);
-		return false;
+		LOG("更新失败：" + sql);
+		return 0;
 	}
-	return true;
+	return 1;
 }
-
-MYSQL_RES* Connection::query(string sql)
+MYSQL_RES* Connection::query(std::string sql)
 {
-	// 查询操作 select
-	if (mysql_query(_conn, sql.c_str()))
+	if (mysql_query(m_conn, sql.c_str()))
 	{
-		LOG("查询失败:" + sql);
+		LOG("查询失败：" + sql);
 		return nullptr;
 	}
-	return mysql_use_result(_conn);
+	return mysql_use_result(m_conn);
+}
+// 显示查询结果的函数
+void Connection::displayQueryResult(MYSQL_RES* result) {
+    if (result == nullptr) {
+        return;
+    }
+
+    // 获取字段信息
+    MYSQL_FIELD* fields = mysql_fetch_fields(result);
+    unsigned int num_fields = mysql_num_fields(result);
+
+    // 打印表头
+    for (unsigned int i = 0; i < num_fields; ++i) {
+        std::cout << fields[i].name << "\t";
+    }
+    std::cout << std::endl;
+
+    // 逐行打印结果
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result))) {
+        for (unsigned int i = 0; i < num_fields; ++i) {
+            std::cout << (row[i] ? row[i] : "NULL") << "\t";
+        }
+        std::cout << std::endl;
+    }
+
+    // 释放结果集
+    mysql_free_result(result);
 }

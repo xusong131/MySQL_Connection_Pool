@@ -1,195 +1,141 @@
-ï»¿
+#include<iostream>
+#include<string>
+#include<mysql.h>
+#include<fstream>
+#include"CommonConnectPool.h"
+#include<thread>
+#include<functional>
+#include"public.h"
 
-#include "pch.h"
-#include "CommonConnectionPool.h"
-#include "public.h"
+//¹¹Ôìº¯ÊıµÄÊµÏÖ
+ConnectionPool::ConnectionPool()
+{
+    if (Load_Config_File())
+    {
+        //´´½¨³õÊ¼Á¬½Ó
+        for (int i = 0; i < init_size; ++i)
+        {
+            Connection* p = new Connection();
+            p->connect(m_ip, m_port, m_uname, m_password, m_dbname);
+            m_connectionQueue.push(p);
+            connection_count++;
+        }
+    }
+    //Æô¶¯Ò»¸öĞÂÏß³Ì£¬×÷ÎªÁ¬½ÓÉú²úÕß
+    std::thread productor(std::bind(&ConnectionPool::ProduceTask,this));
+    productor.detach();
+}
 
-// çº¿ç¨‹å®‰å…¨çš„æ‡’æ±‰å•ä¾‹å‡½æ•°æ¥å£
+//»ñÈ¡Ïß³Ì³Øµ¥ÀıµÄÊµÏÖ
 ConnectionPool* ConnectionPool::getConnectionPool()
 {
-	static ConnectionPool pool; // lockå’Œunlock
+	static ConnectionPool pool; //¾²Ì¬¾Ö²¿±äÁ¿£¬±àÒëÆ÷×Ô¶¯¼Ó½âËø£¬Ïß³Ì°²È«
 	return &pool;
 }
 
-// ä»é…ç½®æ–‡ä»¶ä¸­åŠ è½½é…ç½®é¡¹
-bool ConnectionPool::loadConfigFile()
+//ÔØÈëÅäÖÃÎÄ¼şº¯ÊıÊµÏÖ
+bool ConnectionPool::Load_Config_File()
 {
-	FILE *pf = fopen("mysql.ini", "r");
-	if (pf == nullptr)
-	{
-		LOG("mysql.ini file is not exist!");
-		return false;
-	}
+    std::ifstream cfg("E:\\VS project\\MySQL_Connection_Pool\\MySQL_Connection_Pool\\mysql.ini", std::ios::in);
+    if (!cfg.is_open()) {
+        std::cerr << "ÎÄ¼ş´ò¿ªÊ§°Ü" << std::endl;
+        return false;
+    }
 
-	while (!feof(pf))
-	{
-		char line[1024] = { 0 };
-		fgets(line, 1024, pf);
-		string str = line;
-		int idx = str.find('=', 0);
-		if (idx == -1) // æ— æ•ˆçš„é…ç½®é¡¹
-		{
-			continue;
-		}
+    std::string line;
+    while (std::getline(cfg, line)) {
+        // ÕÒµ½µÈºÅµÄÎ»ÖÃ
+        size_t pos = line.find('=');
+        if (pos == std::string::npos) {
+            std::cerr << "ÎŞĞ§µÄÅäÖÃĞĞ: " << line << std::endl;
+            continue; // Ìø¹ıÎŞĞ§ĞĞ
+        }
 
-		// password=123456\n
-		int endidx = str.find('\n', idx);
-		string key = str.substr(0, idx);
-		string value = str.substr(idx + 1, endidx - idx - 1);
+        // ÌáÈ¡¼üºÍÖµ
+        std::string key = line.substr(0, pos);          // µÈºÅÇ°µÄ²¿·Ö
+        std::string value = line.substr(pos + 1);       // µÈºÅºóµÄ²¿·Ö
 
-		if (key == "ip")
-		{
-			_ip = value;
-		}
-		else if (key == "port")
-		{
-			_port = atoi(value.c_str());
-		}
-		else if (key == "username")
-		{
-			_username = value;
-		}
-		else if (key == "password")
-		{
-			_password = value;
-		}
-		else if (key == "dbname")
-		{
-			_dbname = value;
-		}
-		else if (key == "initSize")
-		{
-			_initSize = atoi(value.c_str());
-		}
-		else if (key == "maxSize")
-		{
-			_maxSize = atoi(value.c_str());
-		}
-		else if (key == "maxIdleTime")
-		{
-			_maxIdleTime = atoi(value.c_str());
-		}
-		else if (key == "connectionTimeOut")
-		{
-			_connectionTimeout = atoi(value.c_str());
-		}
-	}
-	return true;
+        // ¸ù¾İ¼ü¸³Öµµ½ÏàÓ¦µÄ³ÉÔ±±äÁ¿
+        if (key == "ip") {
+            m_ip = value;
+        }
+        else if (key == "port") {
+            m_port = std::stoi(value);                 // ×ª»»ÎªÕûÊı
+        }
+        else if (key == "user_name") {
+            m_uname = value;
+        }
+        else if (key == "password") {
+            m_password = value;
+        }
+        else if (key == "database") {
+            m_dbname = value;
+        }
+        else if (key == "init_size") {
+            init_size = std::stoi(value);              // ×ª»»ÎªÕûÊı
+        }
+        else if (key == "max_size") {
+            max_size = std::stoi(value);
+        }
+        else if (key == "max_spare_time") {
+            max_spare_time = std::stoi(value);
+        }
+        else if (key == "connect_timeout") {
+            connect_timeout = std::stoi(value);
+        }
+        else {
+            std::cerr << "Î´ÖªÅäÖÃÏî: " << key << std::endl;
+        }
+    }
+    cfg.close();
+    return true;
 }
 
-// è¿æ¥æ± çš„æ„é€ 
-ConnectionPool::ConnectionPool()
-{
-	// åŠ è½½é…ç½®é¡¹äº†
-	if (!loadConfigFile())
-	{
-		return;
-	}
+//Éú²úÕßÏß³Ìº¯ÊıÊµÏÖ
+void ConnectionPool::ProduceTask()
+{   
+    for (;;)
+    {
+        std::unique_lock<std::mutex> lock(QueueMutex);
+        while (!m_connectionQueue.empty())
+        {
+            cv.wait(lock); //¶ÓÁĞ²»Îª¿Õ£¬Éú²úÏß³ÌµÈ´ı
+        }
 
-	// åˆ›å»ºåˆå§‹æ•°é‡çš„è¿æ¥
-	for (int i = 0; i < _initSize; ++i)
-	{
-		Connection *p = new Connection();
-		p->connect(_ip, _port, _username, _password, _dbname);
-		p->refreshAliveTime(); // åˆ·æ–°ä¸€ä¸‹å¼€å§‹ç©ºé—²çš„èµ·å§‹æ—¶é—´
-		_connectionQue.push(p);
-		_connectionCnt++;
-	}
+        //Á¬½ÓÊıÁ¿Î´´ïÉÏÏŞ£¬¼ÌĞø´´½¨Á¬½Ó
+        if (connection_count < max_size)
+        {
+            Connection* p = new Connection();
+            p->connect(m_ip, m_port, m_uname, m_password, m_dbname);
+            m_connectionQueue.push(p);
+            connection_count++;
+        }
 
-	// å¯åŠ¨ä¸€ä¸ªæ–°çš„çº¿ç¨‹ï¼Œä½œä¸ºè¿æ¥çš„ç”Ÿäº§è€… linux thread => pthread_create
-	thread produce(std::bind(&ConnectionPool::produceConnectionTask, this));
-	produce.detach();
-
-	// å¯åŠ¨ä¸€ä¸ªæ–°çš„å®šæ—¶çº¿ç¨‹ï¼Œæ‰«æè¶…è¿‡maxIdleTimeæ—¶é—´çš„ç©ºé—²è¿æ¥ï¼Œè¿›è¡Œå¯¹äºçš„è¿æ¥å›æ”¶
-	thread scanner(std::bind(&ConnectionPool::scannerConnectionTask, this));
-	scanner.detach();
+        cv.notify_all(); //Í¨ÖªÏû·ÑÕßÏß³Ì
+    }
 }
 
-// è¿è¡Œåœ¨ç‹¬ç«‹çš„çº¿ç¨‹ä¸­ï¼Œä¸“é—¨è´Ÿè´£ç”Ÿäº§æ–°è¿æ¥
-void ConnectionPool::produceConnectionTask()
+//Ïû·ÑÕßÏß³Ìº¯ÊıÊµÏÖ
+std::shared_ptr<Connection> ConnectionPool::getConnection()
 {
-	for (;;)
-	{
-		unique_lock<mutex> lock(_queueMutex);
-		while (!_connectionQue.empty())
-		{
-			cv.wait(lock); // é˜Ÿåˆ—ä¸ç©ºï¼Œæ­¤å¤„ç”Ÿäº§çº¿ç¨‹è¿›å…¥ç­‰å¾…çŠ¶æ€
-		}
+    std::unique_lock<std::mutex> lock(QueueMutex);
+    if (m_connectionQueue.empty())
+    {
+        cv.wait_for(lock,std::chrono::milliseconds(connect_timeout));
+        if (m_connectionQueue.empty())
+        {
+            LOG("»ñÈ¡Á¬½Ó³¬Ê±£¬ÔİÎŞ¿ÉÓÃÁ¬½Ó£¡");
+            return nullptr;
+        }
+    }
 
-		// è¿æ¥æ•°é‡æ²¡æœ‰åˆ°è¾¾ä¸Šé™ï¼Œç»§ç»­åˆ›å»ºæ–°çš„è¿æ¥
-		if (_connectionCnt < _maxSize)
-		{
-			Connection *p = new Connection();
-			p->connect(_ip, _port, _username, _password, _dbname);
-			p->refreshAliveTime(); // åˆ·æ–°ä¸€ä¸‹å¼€å§‹ç©ºé—²çš„èµ·å§‹æ—¶é—´
-			_connectionQue.push(p);
-			_connectionCnt++;
-		}
-
-		// é€šçŸ¥æ¶ˆè´¹è€…çº¿ç¨‹ï¼Œå¯ä»¥æ¶ˆè´¹è¿æ¥äº†
-		cv.notify_all();
-	}
-}
-
-// ç»™å¤–éƒ¨æä¾›æ¥å£ï¼Œä»è¿æ¥æ± ä¸­è·å–ä¸€ä¸ªå¯ç”¨çš„ç©ºé—²è¿æ¥
-shared_ptr<Connection> ConnectionPool::getConnection()
-{
-	unique_lock<mutex> lock(_queueMutex);
-	while (_connectionQue.empty())
-	{
-		// sleep
-		if (cv_status::timeout == cv.wait_for(lock, chrono::milliseconds(_connectionTimeout)))
-		{
-			if (_connectionQue.empty())
-			{
-				LOG("è·å–ç©ºé—²è¿æ¥è¶…æ—¶äº†...è·å–è¿æ¥å¤±è´¥!");
-					return nullptr;
-			}
-		}
-	}
-
-	/*
-	shared_ptræ™ºèƒ½æŒ‡é’ˆææ„æ—¶ï¼Œä¼šæŠŠconnectionèµ„æºç›´æ¥deleteæ‰ï¼Œç›¸å½“äº
-	è°ƒç”¨connectionçš„ææ„å‡½æ•°ï¼Œconnectionå°±è¢«closeæ‰äº†ã€‚
-	è¿™é‡Œéœ€è¦è‡ªå®šä¹‰shared_ptrçš„é‡Šæ”¾èµ„æºçš„æ–¹å¼ï¼ŒæŠŠconnectionç›´æ¥å½’è¿˜åˆ°queueå½“ä¸­
-	*/
-	shared_ptr<Connection> sp(_connectionQue.front(), 
-		[&](Connection *pcon) {
-		// è¿™é‡Œæ˜¯åœ¨æœåŠ¡å™¨åº”ç”¨çº¿ç¨‹ä¸­è°ƒç”¨çš„ï¼Œæ‰€ä»¥ä¸€å®šè¦è€ƒè™‘é˜Ÿåˆ—çš„çº¿ç¨‹å®‰å…¨æ“ä½œ
-		unique_lock<mutex> lock(_queueMutex);
-		pcon->refreshAliveTime(); // åˆ·æ–°ä¸€ä¸‹å¼€å§‹ç©ºé—²çš„èµ·å§‹æ—¶é—´
-		_connectionQue.push(pcon);
-	});
-
-	_connectionQue.pop();
-	cv.notify_all();  // æ¶ˆè´¹å®Œè¿æ¥ä»¥åï¼Œé€šçŸ¥ç”Ÿäº§è€…çº¿ç¨‹æ£€æŸ¥ä¸€ä¸‹ï¼Œå¦‚æœé˜Ÿåˆ—ä¸ºç©ºäº†ï¼Œèµ¶ç´§ç”Ÿäº§è¿æ¥
-	
-	return sp;
-}
-
-// æ‰«æè¶…è¿‡maxIdleTimeæ—¶é—´çš„ç©ºé—²è¿æ¥ï¼Œè¿›è¡Œå¯¹äºçš„è¿æ¥å›æ”¶
-void ConnectionPool::scannerConnectionTask()
-{
-	for (;;)
-	{
-		// é€šè¿‡sleepæ¨¡æ‹Ÿå®šæ—¶æ•ˆæœ
-		this_thread::sleep_for(chrono::seconds(_maxIdleTime));
-
-		// æ‰«ææ•´ä¸ªé˜Ÿåˆ—ï¼Œé‡Šæ”¾å¤šä½™çš„è¿æ¥
-		unique_lock<mutex> lock(_queueMutex);
-		while (_connectionCnt > _initSize)
-		{
-			Connection *p = _connectionQue.front();
-			if (p->getAliveeTime() >= (_maxIdleTime * 1000))
-			{
-				_connectionQue.pop();
-				_connectionCnt--;
-				delete p; // è°ƒç”¨~Connection()é‡Šæ”¾è¿æ¥
-			}
-			else
-			{
-				break; // é˜Ÿå¤´çš„è¿æ¥æ²¡æœ‰è¶…è¿‡_maxIdleTimeï¼Œå…¶å®ƒè¿æ¥è‚¯å®šæ²¡æœ‰
-			}
-		}
-	}
+    std::shared_ptr<Connection> sp(m_connectionQueue.front(),
+        [&](Connection* ptr) {
+            //¿¼ÂÇ¶ÓÁĞÏß³Ì°²È«
+            std::unique_lock<std::mutex> lock(QueueMutex);
+            m_connectionQueue.push(ptr);
+        });
+    m_connectionQueue.pop();
+    cv.notify_all();
+    return sp;
 }
